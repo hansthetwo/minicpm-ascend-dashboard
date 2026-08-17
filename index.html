@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>PR29 CPU 计算与 Overlap 分析看板</title>
+  <style>
+    :root {
+      --bg: #071019;
+      --bg-soft: #0b1622;
+      --panel: rgba(14, 28, 42, .88);
+      --panel-strong: #102235;
+      --line: rgba(148, 178, 209, .17);
+      --line-strong: rgba(148, 178, 209, .32);
+      --text: #edf6ff;
+      --muted: #94a9bc;
+      --cyan: #38d9d0;
+      --blue: #69a7ff;
+      --violet: #ab8cff;
+      --orange: #ffb45c;
+      --red: #ff6f7d;
+      --green: #72df9a;
+      --shadow: 0 20px 60px rgba(0, 0, 0, .28);
+      --radius: 18px;
+    }
+
+    body.light {
+      --bg: #edf3f8;
+      --bg-soft: #f7fafc;
+      --panel: rgba(255, 255, 255, .92);
+      --panel-strong: #ffffff;
+      --line: rgba(34, 63, 91, .13);
+      --line-strong: rgba(34, 63, 91, .25);
+      --text: #132638;
+      --muted: #61768a;
+      --shadow: 0 20px 55px rgba(30, 58, 86, .12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 8% 0%, rgba(56, 217, 208, .13), transparent 28rem),
+        radial-gradient(circle at 92% 7%, rgba(171, 140, 255, .13), transparent 32rem),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.55;
+    }
+
+    button, input, select { font: inherit; }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      padding: .13rem .38rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(105, 167, 255, .08);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: .9em;
+    }
+
+    .shell { width: min(1500px, calc(100% - 32px)); margin: 0 auto; padding: 22px 0 70px; }
+    .topbar {
+      position: sticky;
+      z-index: 20;
+      top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 15px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--bg) 78%, transparent);
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow);
+    }
+
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .brand-mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 11px;
+      color: #061418;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      font-weight: 900;
+    }
+    .brand-copy { min-width: 0; }
+    .brand-copy strong { display: block; font-size: .93rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .brand-copy span { display: block; color: var(--muted); font-size: .72rem; }
+    .top-actions { display: flex; gap: 8px; }
+    .icon-btn, .link-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      background: var(--panel);
+      cursor: pointer;
+    }
+    .icon-btn:hover, .link-btn:hover { border-color: var(--line-strong); text-decoration: none; }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(330px, .65fr);
+      gap: 20px;
+      margin: 46px 0 24px;
+    }
+    .hero-copy, .hero-aside, .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .hero-copy { padding: clamp(25px, 4vw, 48px); overflow: hidden; position: relative; }
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      right: -120px;
+      bottom: -170px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(56,217,208,.2), transparent 68%);
+    }
+    .eyebrow { color: var(--cyan); font-size: .75rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 12px 0 14px; max-width: 850px; font-size: clamp(2rem, 4.2vw, 4.15rem); line-height: 1.04; letter-spacing: -.045em; }
+    .hero-copy p { max-width: 850px; margin: 0; color: var(--muted); font-size: clamp(.96rem, 1.4vw, 1.12rem); }
+    .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .meta-chip { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .75rem; background: rgba(105,167,255,.06); }
+    .hero-aside { padding: 22px; display: flex; flex-direction: column; justify-content: space-between; }
+    .verdict { padding: 17px; border-radius: 14px; background: linear-gradient(135deg, rgba(56,217,208,.12), rgba(105,167,255,.08)); border: 1px solid rgba(56,217,208,.23); }
+    .verdict .label { color: var(--cyan); font-size: .72rem; font-weight: 800; letter-spacing: .1em; }
+    .verdict strong { display: block; margin-top: 8px; font-size: 1.22rem; }
+    .verdict p { margin: 8px 0 0; color: var(--muted); font-size: .87rem; }
+    .hero-list { display: grid; gap: 9px; margin-top: 18px; }
+    .hero-list div { display: flex; justify-content: space-between; gap: 15px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); font-size: .84rem; }
+    .hero-list span { color: var(--muted); }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 13px; margin-bottom: 22px; }
+    .metric {
+      position: relative;
+      overflow: hidden;
+      min-height: 128px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+    .metric::after { content: ""; position: absolute; inset: auto -30px -45px auto; width: 110px; height: 110px; border-radius: 50%; background: var(--metric-color); filter: blur(42px); opacity: .24; }
+    .metric .number { display: block; font-size: 2.35rem; font-weight: 850; line-height: 1; letter-spacing: -.04em; }
+    .metric .title { display: block; margin-top: 10px; font-weight: 700; }
+    .metric .hint { display: block; margin-top: 4px; color: var(--muted); font-size: .76rem; }
+
+    .tabs { display: flex; flex-wrap: wrap; gap: 7px; padding: 7px; margin: 26px 0 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    .tab-btn { padding: 9px 14px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; cursor: pointer; font-weight: 700; font-size: .87rem; }
+    .tab-btn.active { color: #061418; background: linear-gradient(135deg, var(--cyan), #7be8c4); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; animation: rise .24s ease-out; }
+    @keyframes rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+    .panel { padding: 22px; margin-bottom: 16px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 17px; }
+    .panel h2 { margin: 0; font-size: 1.25rem; }
+    .panel h3 { margin: 0; font-size: 1rem; }
+    .panel-sub { margin-top: 5px; color: var(--muted); font-size: .83rem; }
+    .two-col { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+
+    .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); align-items: stretch; gap: 10px; }
+    .stage { position: relative; min-height: 148px; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, rgba(105,167,255,.08), transparent); }
+    .stage:not(:last-child)::after { content: "→"; position: absolute; z-index: 3; right: -18px; top: 50%; transform: translateY(-50%); color: var(--cyan); font-size: 1.1rem; }
+    .stage-index { color: var(--cyan); font-size: .7rem; font-weight: 900; }
+    .stage strong { display: block; margin: 10px 0 4px; }
+    .stage p { margin: 0; color: var(--muted); font-size: .78rem; }
+    .stage-count { position: absolute; right: 13px; bottom: 11px; font-size: 1.5rem; font-weight: 850; color: color-mix(in srgb, var(--blue) 70%, var(--text)); }
+
+    .bar-chart { display: grid; gap: 13px; }
+    .bar-row { display: grid; grid-template-columns: 145px minmax(0,1fr) 90px; gap: 12px; align-items: center; font-size: .82rem; }
+    .bar-label { color: var(--muted); }
+    .bar-track { height: 12px; overflow: hidden; border-radius: 999px; background: rgba(148,178,209,.12); }
+    .bar-fill { height: 100%; width: var(--w); min-width: 4px; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--blue)); }
+    .bar-fill.warn { background: linear-gradient(90deg, var(--orange), var(--red)); }
+    .bar-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 750; }
+
+    .callout { padding: 16px 17px; border-left: 3px solid var(--cyan); border-radius: 0 12px 12px 0; background: rgba(56,217,208,.07); }
+    .callout.warn { border-color: var(--orange); background: rgba(255,180,92,.07); }
+    .callout strong { display: block; margin-bottom: 5px; }
+    .callout p { margin: 0; color: var(--muted); font-size: .85rem; }
+
+    .toolbar { display: grid; grid-template-columns: minmax(250px,1fr) 190px 170px auto; gap: 9px; margin-bottom: 14px; }
+    .field { width: 100%; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--bg-soft); outline: none; }
+    .field:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(56,217,208,.1); }
+    .result-count { display: flex; align-items: center; justify-content: flex-end; color: var(--muted); font-size: .82rem; white-space: nowrap; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 13px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1050px; }
+    th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: .79rem; }
+    th { position: sticky; z-index: 2; top: 0; color: var(--muted); background: var(--panel-strong); font-size: .71rem; letter-spacing: .04em; }
+    tbody tr:hover { background: rgba(105,167,255,.045); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .id-cell { font-family: monospace; color: var(--cyan); font-weight: 700; }
+    .kind { display: inline-flex; padding: 3px 7px; border-radius: 999px; font-size: .68rem; font-weight: 800; }
+    .kind.compute { color: var(--cyan); background: rgba(56,217,208,.11); }
+    .kind.data { color: var(--blue); background: rgba(105,167,255,.12); }
+    .kind.control { color: var(--orange); background: rgba(255,180,92,.12); }
+    .src { color: var(--muted); font-family: monospace; font-size: .72rem; }
+
+    .candidate-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+    .candidate { padding: 18px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, rgba(105,167,255,.06), transparent); }
+    .candidate-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .priority { display: inline-flex; padding: 3px 9px; border-radius: 999px; font-size: .7rem; font-weight: 900; }
+    .priority.p1 { color: #071019; background: var(--green); }
+    .priority.p2 { color: #071019; background: var(--orange); }
+    .priority.p3 { color: var(--text); background: rgba(171,140,255,.25); }
+    .candidate h3 { margin-top: 13px; }
+    .candidate p { margin: 7px 0; color: var(--muted); font-size: .82rem; }
+    .flow-mini { margin: 13px 0; padding: 11px; border-radius: 10px; background: rgba(0,0,0,.16); color: #bceff1; font: .73rem/1.6 monospace; white-space: pre-wrap; }
+    body.light .flow-mini { background: rgba(38,67,95,.06); color: #315a6d; }
+    .candidate-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+    .candidate-meta span { padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font-size: .69rem; }
+
+    .dependency-list { display: grid; gap: 10px; }
+    .dependency { display: grid; grid-template-columns: 35px 1fr; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+    .dependency .x { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--red); background: rgba(255,111,125,.12); font-weight: 900; }
+    .dependency strong { display: block; font-size: .86rem; }
+    .dependency p { margin: 4px 0 0; color: var(--muted); font-size: .78rem; }
+
+    .ab-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 11px; }
+    .ab-item { padding: 15px; border: 1px solid var(--line); border-radius: 12px; }
+    .ab-item span { display: block; color: var(--muted); font-size: .71rem; }
+    .ab-item strong { display: block; margin-top: 6px; font-size: 1.22rem; }
+    .negative { color: var(--red); }
+    .positive { color: var(--green); }
+
+    .estimate-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 11px; margin-bottom: 16px; }
+    .estimate-card { padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(145deg, rgba(105,167,255,.07), transparent); }
+    .estimate-card span { display: block; color: var(--muted); font-size: .72rem; }
+    .estimate-card strong { display: block; margin-top: 6px; font-size: 1.25rem; }
+    .estimate-card small { display: block; margin-top: 5px; color: var(--muted); font-size: .7rem; }
+    .rank-badge { display: inline-grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; background: rgba(56,217,208,.12); color: var(--cyan); font-weight: 900; }
+    .confidence { display: inline-flex; padding: 3px 7px; border-radius: 999px; font-size: .67rem; font-weight: 850; }
+    .confidence.high { color: var(--green); background: rgba(114,223,154,.12); }
+    .confidence.medium { color: var(--orange); background: rgba(255,180,92,.12); }
+    .confidence.low { color: var(--red); background: rgba(255,111,125,.11); }
+    .saving-main { display: block; color: var(--green); font-size: .87rem; font-weight: 850; white-space: nowrap; }
+    .saving-sub { display: block; margin-top: 3px; color: var(--muted); font-size: .69rem; white-space: nowrap; }
+    .estimate-note { max-width: 520px; color: var(--muted); font-size: .73rem; }
+
+    .footnote { color: var(--muted); font-size: .76rem; }
+    .footer { margin-top: 24px; padding: 18px 4px; color: var(--muted); font-size: .75rem; text-align: center; }
+
+    @media (max-width: 1000px) {
+      .hero, .two-col { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(2,1fr); }
+      .pipeline { grid-template-columns: 1fr; }
+      .stage:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -19px; transform: translateX(50%); }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .candidate-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 650px) {
+      .shell { width: min(100% - 18px, 1500px); }
+      .brand-copy span, .top-actions .hide-mobile { display: none; }
+      .hero { margin-top: 26px; }
+      .metric-grid, .toolbar, .ab-grid, .estimate-summary { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 100px 1fr 70px; }
+      .panel { padding: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <nav class="topbar" aria-label="页面导航">
+      <div class="brand">
+        <div class="brand-mark">P29</div>
+        <div class="brand-copy">
+          <strong>CPU × NPU Pipeline Inspector</strong>
+          <span>MiniCPM-o · Official Duplex Path</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="link-btn hide-mobile" href="cpu_overlap_scan_pr29_20260817.md">原始报告</a>
+        <a class="link-btn hide-mobile" href="cpu_overlap_scan_pr29_20260817.json">JSON</a>
+        <button class="icon-btn" id="themeToggle" type="button" aria-label="切换主题">◐</button>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Static scan + runtime evidence</div>
+        <h1>CPU 计算分布与<br>Overlap 可行性</h1>
+        <p>沿 PR29 官方 W8A8 双工调用链，逐项定位主机侧计算、数据搬运与同步点，并结合三次正式运行判断哪些工作能安全重叠、哪些受自回归依赖约束。</p>
+        <div class="meta-row">
+          <span class="meta-chip">Commit ecab6c47</span>
+          <span class="meta-chip">CANN / Ascend</span>
+          <span class="meta-chip">C++ Token2Wav</span>
+          <span class="meta-chip">2026-08-17</span>
+        </div>
+      </div>
+      <aside class="hero-aside">
+        <div class="verdict">
+          <span class="label">当前判断</span>
+          <strong>先消除host往返，再增加并发</strong>
+          <p>新诊断确认CPU head为55.683 ms/run，但历史NPU路线受采样轨迹限制。当前P1是condition device fusion与LLM hidden批量D2H；同卡粗粒度TTS–T2W并发仍不恢复。</p>
+        </div>
+        <div class="hero-list">
+          <div><span>扫描范围</span><b>官方双工稳态</b></div>
+          <div><span>动态样本</span><b>3 runs / 111 chunks</b></div>
+          <div><span>最高建议级别</span><b>Condition device fusion</b></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="metric-grid" aria-label="总览指标">
+      <article class="metric" style="--metric-color:var(--cyan)"><span class="number">31</span><span class="title">CPU热路径站点</span><span class="hint">逻辑站点，不等于源码行数</span></article>
+      <article class="metric" style="--metric-color:var(--blue)"><span class="number">20</span><span class="title">数值计算 / 查表</span><span class="hint">FFT、normalize、head、sampler等</span></article>
+      <article class="metric" style="--metric-color:var(--violet)"><span class="number">8</span><span class="title">搬运 / 缓存整理</span><span class="hint">D2H/H2D、memcpy、crop</span></article>
+      <article class="metric" style="--metric-color:var(--orange)"><span class="number">3</span><span class="title">调度 / I/O</span><span class="hint">队列、WAV与完成标记</span></article>
+    </section>
+
+    <div class="tabs" role="tablist" aria-label="分析视图">
+      <button class="tab-btn active" data-tab="overview" role="tab">总览</button>
+      <button class="tab-btn" data-tab="inventory" role="tab">CPU清单</button>
+      <button class="tab-btn" data-tab="savings" role="tab">31项收益排序</button>
+      <button class="tab-btn" data-tab="overlap" role="tab">Overlap候选</button>
+      <button class="tab-btn" data-tab="evidence" role="tab">动态证据</button>
+      <button class="tab-btn" data-tab="method" role="tab">边界与验收</button>
+    </div>
+
+    <section class="tab-pane active" id="overview" role="tabpanel">
+      <article class="panel">
+        <div class="panel-head">
+          <div><h2>CPU工作沿流水线的分布</h2><div class="panel-sub">数字为每个模块识别出的host热路径站点数</div></div>
+        </div>
+        <div class="pipeline">
+          <div class="stage"><span class="stage-index">STAGE 01</span><strong>输入 / VPM / APM</strong><p>音频解码、log-Mel、图像切片归一化、位置输入与embedding pack</p><span class="stage-count">6</span></div>
+          <div class="stage"><span class="stage-index">STAGE 02</span><strong>主 LLM Host</strong><p>特殊logits调整、CPU sampler、hidden D2H与turn状态机</p><span class="stage-count">6</span></div>
+          <div class="stage"><span class="stage-index">STAGE 03</span><strong>TTS Condition</strong><p>token过滤、emb_text、projector往返、L2 normalize与merge</p><span class="stage-count">5</span></div>
+          <div class="stage"><span class="stage-index">STAGE 04</span><strong>TTS Token Loop</strong><p>hidden D2H、head_code、temperature、top-k/top-p和emb_code</p><span class="stage-count">7</span></div>
+          <div class="stage"><span class="stage-index">STAGE 05</span><strong>Token2Wav Host</strong><p>28-token窗口、cache整理、crossfade、PCM与WAV发布</p><span class="stage-count">7</span></div>
+        </div>
+      </article>
+
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><div><h2>确定性的CPU算术热点</h2><div class="panel-sub">TTS每生成一个audio token都会执行</div></div></div>
+          <div class="callout">
+            <strong>head_code：5,039,616 F32 MAC / audio token</strong>
+            <p><code>hidden[768] × weight[6562,768] → logits[6562]</code>。当前已用常驻32线程分片；它可以和其他独立NPU阶段并行，但不能越过同一TTS序列的采样依赖。</p>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>最明显的数据往返</h2><div class="panel-sub">TTS condition仍存在host round-trip</div></div></div>
+          <div class="flow-mini">LLM hidden(host)
+  → H2D → semantic projector(NPU)
+  → D2H → L2 normalize + emb_text add(CPU)
+  → H2D → TTS Transformer(NPU)</div>
+          <p class="footnote">简单并行emb_text只隐藏很小的3 KiB/token拷贝；更优方向是condition device fusion，减少NPU→CPU→NPU。</p>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>阶段墙钟均值</h2><div class="panel-sub">正式3-run数据；包含NPU、同步和队列，并非CPU独占时间</div></div></div>
+        <div class="bar-chart" id="overviewBars"></div>
+      </article>
+    </section>
+
+    <section class="tab-pane" id="inventory" role="tabpanel">
+      <article class="panel">
+        <div class="panel-head">
+          <div><h2>31项CPU热路径清单</h2><div class="panel-sub">支持按模块、类型和关键词筛选；源码位置来自当前提交</div></div>
+        </div>
+        <div class="toolbar">
+          <input class="field" id="searchInput" type="search" placeholder="搜索工作、规模、源码或依赖…">
+          <select class="field" id="moduleFilter" aria-label="模块筛选"><option value="all">全部模块</option></select>
+          <select class="field" id="kindFilter" aria-label="类型筛选"><option value="all">全部类型</option><option value="compute">数值计算/查表</option><option value="data">搬运/缓存</option><option value="control">调度/I/O</option></select>
+          <div class="result-count" id="resultCount">31 / 31</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>模块</th><th>类型</th><th>CPU工作</th><th>频率 / 规模</th><th>依赖与判断</th><th>源码</th></tr></thead>
+            <tbody id="inventoryBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="tab-pane" id="savings" role="tabpanel">
+      <div class="estimate-summary">
+        <article class="estimate-card"><span>本轮诊断规模</span><strong>37 chunks / 361 TTS tokens</strong><small>同一官方 omni_duplex1.mp4，单次诊断，不替代3W20正式结果</small></article>
+        <article class="estimate-card"><span>实测 CPU head_code</span><strong>55.683 ms / run</strong><small>0.154 ms/audio token；31项中最大的已确认CPU数值热点</small></article>
+        <article class="estimate-card"><span>实测 CPU sampler</span><strong>15.966 ms / run</strong><small>0.044 ms/audio token；TTS-3~6共享这个总上限</small></article>
+        <article class="estimate-card"><span>保守组合预期</span><strong>约 12–35 ms / run</strong><small>按关键路径折扣后；各行不可直接相加，需逐项A/B</small></article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div><h2>31项实际链路毫秒收益排序</h2><div class="panel-sub">默认按 SPEAK→最终WAV 可兑现净收益区间的中点排序；“阶段毛收益”表示该操作自身阶段累计节省</div></div>
+        </div>
+        <div class="callout warn" style="margin-bottom:16px">
+          <strong>如何读这些数字</strong>
+          <p>实测只覆盖已有 TTS 分项计时；其余是根据37个输入chunk、约53个有效文本token、361个audio token、11个WAV窗口和内存规模建立的工程区间。输入预处理虽然阶段毛收益大，但大部分会被1秒输入节奏隐藏，所以净收益显著折扣。COND-2~5、TTS-3~6等共享同一上限，不能相加。</p>
+        </div>
+        <div class="toolbar" style="grid-template-columns:minmax(250px,1fr) 190px 170px auto">
+          <input class="field" id="savingSearch" type="search" placeholder="搜索ID、优化方案或依据…">
+          <select class="field" id="savingModule" aria-label="收益模块筛选"><option value="all">全部模块</option></select>
+          <select class="field" id="savingConfidence" aria-label="置信度筛选"><option value="all">全部置信度</option><option value="high">高：有直接计时/硬上限</option><option value="medium">中：规模推导</option><option value="low">低：待分项计时</option></select>
+          <div class="result-count" id="savingCount">31 / 31</div>
+        </div>
+        <div class="table-wrap">
+          <table style="min-width:1500px">
+            <thead><tr><th>效果排名</th><th>ID / 模块</th><th>建议级别</th><th>置信度</th><th>单次潜在节省</th><th>阶段毛收益 / run</th><th>SPEAK→最终WAV净收益 / run</th><th>建议优化方式</th><th>估算依据与限制</th></tr></thead>
+            <tbody id="savingBody"></tbody>
+          </table>
+        </div>
+        <p class="footnote" style="margin-top:13px">排序是“可能效果”排序，不等同于开发ROI。P1/P2/P3同时考虑正确性、实现成本和历史A/B：例如 TTS-2 效果上限排名第一，但因已有CPU线程池、NPU轨迹风险和历史完整链路近噪声，仅建议P2继续。</p>
+      </article>
+
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><div><h2>直接测得的硬上限</h2><div class="panel-sub">优化不可能节省超过当前操作本身耗时</div></div></div>
+          <div class="bar-chart">
+            <div class="bar-row"><span class="bar-label">TTS head_code</span><div class="bar-track"><div class="bar-fill" style="--w:100%"></div></div><span class="bar-value">55.683 ms</span></div>
+            <div class="bar-row"><span class="bar-label">TTS sampler</span><div class="bar-track"><div class="bar-fill" style="--w:28.67%"></div></div><span class="bar-value">15.966 ms</span></div>
+            <div class="bar-row"><span class="bar-label">emb_code gather</span><div class="bar-track"><div class="bar-fill" style="--w:.78%"></div></div><span class="bar-value">0.435 ms</span></div>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>优先落地组合</h2><div class="panel-sub">避免再次投入低收益微优化</div></div></div>
+          <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:.84rem">
+            <li><b style="color:var(--text)">P1：condition device fusion</b>，把 COND-2~5 作为一个包做，目标净省5–14 ms/run。</li>
+            <li><b style="color:var(--text)">P1：LLM hidden fragment批量D2H</b>，目标净省4–12 ms/run。</li>
+            <li><b style="color:var(--text)">P1：输入预处理双缓冲</b>，先补IN-2~5分项计时；阶段收益大但官方指标折扣高。</li>
+            <li><b style="color:var(--text)">P1：异步有序WAV writer</b>，只有PCM+write P95≥1 ms才实现。</li>
+            <li><b style="color:var(--text)">P2：head/sampler</b>，只接受同轨迹、3W20完整链路改善≥1%的方案。</li>
+          </ol>
+        </article>
+      </div>
+    </section>
+
+    <section class="tab-pane" id="overlap" role="tabpanel">
+      <article class="panel">
+        <div class="panel-head"><div><h2>推荐的Overlap候选</h2><div class="panel-sub">优先级综合正确性、临界路径概率、实现成本和历史A/B</div></div></div>
+        <div class="candidate-grid" id="candidateGrid"></div>
+      </article>
+
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><div><h2>不可直接并行的依赖</h2><div class="panel-sub">不是线程不够，而是结果尚未产生</div></div></div>
+          <div class="dependency-list" id="dependencyList"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>已实现的并行</h2><div class="panel-sub">避免把现状误判成新的优化空间</div></div></div>
+          <div class="dependency-list">
+            <div class="dependency"><div class="x" style="color:var(--green);background:rgba(114,223,154,.12)">✓</div><div><strong>同一帧 VPM || APM</strong><p><code>std::async</code>并行，两套独立context。</p></div></div>
+            <div class="dependency"><div class="x" style="color:var(--green);background:rgba(114,223,154,.12)">✓</div><div><strong>LLM → TTS → T2W三级线程</strong><p>不同fragment通过队列并发推进。</p></div></div>
+            <div class="dependency"><div class="x" style="color:var(--green);background:rgba(114,223,154,.12)">✓</div><div><strong>head_code 32线程分片</strong><p>31个worker加调用线程共同完成6562行投影。</p></div></div>
+            <div class="dependency"><div class="x" style="color:var(--green);background:rgba(114,223,154,.12)">✓</div><div><strong>final speculation</strong><p>私有渲染、turn/epoch校验及commit/abort replay。</p></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="tab-pane" id="evidence" role="tabpanel">
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><div><h2>T2W双峰</h2><div class="panel-sub">33次WAV事件；受争用组约为正常组的9倍</div></div></div>
+          <div class="bar-chart">
+            <div class="bar-row"><span class="bar-label">正常组 · 24次</span><div class="bar-track"><div class="bar-fill" style="--w:7.88%"></div></div><span class="bar-value">88.0 ms</span></div>
+            <div class="bar-row"><span class="bar-label">争用组 · 9次</span><div class="bar-track"><div class="bar-fill warn" style="--w:71%"></div></div><span class="bar-value">793.3 ms</span></div>
+            <div class="bar-row"><span class="bar-label">观测最大值</span><div class="bar-track"><div class="bar-fill warn" style="--w:100%"></div></div><span class="bar-value">1117.3 ms</span></div>
+          </div>
+          <div class="callout warn" style="margin-top:18px"><strong>解释</strong><p>阶段慢化同时伴随queue wait升高，说明同卡VPM/LLM/TTS/T2W并发下的NPU队列、图capture或带宽争用值得优先排查。</p></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>历史粗粒度Overlap A/B</h2><div class="panel-sub">final TTS与普通T2W同卡并发；候选已回退</div></div></div>
+          <div class="ab-grid">
+            <div class="ab-item"><span>Spec TTS</span><strong class="negative">+53.68%</strong></div>
+            <div class="ab-item"><span>TTS stage RTF</span><strong class="negative">+22.47%</strong></div>
+            <div class="ab-item"><span>T2W stage RTF</span><strong class="negative">+13.76%</strong></div>
+            <div class="ab-item"><span>write-mtime RTF</span><strong class="positive">−0.20%</strong></div>
+          </div>
+          <p class="footnote" style="margin-top:15px">等待虽然减少，但同一NPU上的算力/带宽争用抵消收益；完整链路改善低于1%保留门槛。</p>
+          <a href="../tts_scheduler/ab/overlap_t2w_1w3_20260814T1540Z/summary.md">查看原始A/B摘要 →</a>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>全部阶段动态数据</h2><div class="panel-sub">3次clean PR29运行聚合</div></div></div>
+        <div class="table-wrap"><table style="min-width:700px"><thead><tr><th>阶段</th><th>n</th><th>平均</th><th>最小</th><th>最大</th><th>口径</th></tr></thead><tbody id="stageBody"></tbody></table></div>
+      </article>
+    </section>
+
+    <section class="tab-pane" id="method" role="tabpanel">
+      <div class="two-col">
+        <article class="panel">
+          <div class="panel-head"><div><h2>扫描边界</h2><div class="panel-sub">哪些数字可以直接解释，哪些不能</div></div></div>
+          <div class="dependency-list">
+            <div class="dependency"><div class="x">!</div><div><strong>31是逻辑站点，不是耗时百分比</strong><p>一个站点可能只是3 KiB memcpy，也可能是每token五百万次乘加。</p></div></div>
+            <div class="dependency"><div class="x">!</div><div><strong>阶段墙钟不是CPU时间</strong><p>包含NPU计算、同步、queue wait和文件I/O。</p></div></div>
+            <div class="dependency"><div class="x">!</div><div><strong>Vision有CPU scheduler buffer</strong><p>正式日志显示18.30 MiB，但必须用graph dump才能逐节点枚举隐式fallback。</p></div></div>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>A/B验收门槛</h2><div class="panel-sub">每个新Overlap都必须满足</div></div></div>
+          <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:.85rem">
+            <li>同模型、seed、输入和环境，OFF/ON交错快筛。</li>
+            <li>正式结论至少3次预热、20次测量。</li>
+            <li>同时报告poll、write-mtime、pooled/chunk及stage RTF。</li>
+            <li>WAV SHA-256或WER/SIM不得退化。</li>
+            <li>完整链路改善不足1%或阶段明显退化则回退。</li>
+            <li>NPU并发必须附CANN timeline和P95。</li>
+          </ol>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-head"><div><h2>推荐执行顺序</h2><div class="panel-sub">先观测，再做最小可验证改动</div></div></div>
+        <div class="pipeline" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+          <div class="stage"><span class="stage-index">STEP 01</span><strong>Condition device fusion</strong><p>持久projector buffer；融合L2/add并消除host round-trip</p></div>
+          <div class="stage"><span class="stage-index">STEP 02</span><strong>LLM hidden批量D2H</strong><p>按fragment双buffer，移除逐token分配与同步</p></div>
+          <div class="stage"><span class="stage-index">STEP 03</span><strong>输入分项与双buffer</strong><p>先补IN-1~5计时，再做跨帧预处理</p></div>
+          <div class="stage"><span class="stage-index">STEP 04</span><strong>判断writer价值</strong><p>PCM+write P95≥1 ms才实现异步writer</p></div>
+          <div class="stage"><span class="stage-index">STEP 05</span><strong>CANN timeline</strong><p>确认无争用后再试T2M/VOC双stream</p></div>
+        </div>
+      </article>
+    </section>
+
+    <footer class="footer">PR29 CPU / Overlap Analysis · Self-contained HTML · Source commit ecab6c4766064683f1af1e6b2b3c437b7d42120e</footer>
+  </main>
+
+  <script>
+    const moduleNames = {
+      input: "输入 / VPM / APM",
+      llm: "主 LLM Host",
+      condition: "TTS Condition",
+      tts: "TTS Token Loop",
+      t2w: "Token2Wav Host"
+    };
+    const kindNames = { compute: "数值计算/查表", data: "搬运/缓存", control: "调度/I/O" };
+
+    const inventory = [
+      {id:"IN-1",module:"input",kind:"compute",work:"音频文件解码、单声道化与16 kHz重采样",scale:"每audio chunk；通常16,000 samples",dep:"miniaudio host path",src:"tools/omni/audition.cpp:2101"},
+      {id:"IN-2",module:"input",kind:"compute",work:"Hann、分帧、FFT、Mel filterbank、log/clamp/normalize",scale:"1秒输入约80×100 Mel；4 CPU线程",dep:"APM NPU前必须完成",src:"tools/omni/audition.cpp:1950"},
+      {id:"IN-3",module:"input",kind:"compute",work:"图片解码、UHD切片、bicubic resize",scale:"每视频帧",dep:"VPM NPU前必须完成",src:"tools/omni/vision.cpp:2106"},
+      {id:"IN-4",module:"input",kind:"compute",work:"U8→F32、mean/std normalize、HWC→CHW",scale:"每overview/slice",dep:"随后H2D",src:"tools/omni/vision.cpp:2106"},
+      {id:"IN-5",module:"input",kind:"compute",work:"position index与2D sin/cos embedding构造",scale:"每次vision encode",dep:"固定shape可缓存",src:"tools/omni/vision.cpp:2360"},
+      {id:"IN-6",module:"input",kind:"data",work:"VPM/APM输出复制并拼成4096维LLM embedding packet",scale:"每输入frame",dep:"等待两路encoder输出",src:"tools/omni/omni.cpp:11140"},
+
+      {id:"LLM-1",module:"llm",kind:"control",work:"模板/token组织、position数组与batch打包",scale:"prefill及每token decode",dep:"decode前必须完成",src:"tools/omni/omni.cpp:1325"},
+      {id:"LLM-2",module:"llm",kind:"compute",work:"LISTEN bias、TTS_PAD mask、TURN_EOS length penalty",scale:"每文本token",dep:"依赖host可见logits",src:"tools/omni/omni.cpp:1466"},
+      {id:"LLM-3",module:"llm",kind:"compute",work:"common_sampler处理链及随机采样",scale:"每文本token；主词表规模",dep:"结果决定下一decode，严格串行",src:"common/sampling.cpp:537"},
+      {id:"LLM-4",module:"llm",kind:"compute",work:"token→piece/string与控制token分类",scale:"每文本token",dep:"小计算",src:"tools/omni/omni.cpp:1510"},
+      {id:"LLM-5",module:"llm",kind:"data",work:"4096维hidden D2H、malloc与memcpy",scale:"16 KiB/有效文本token",dep:"当前逐token同步取得",src:"tools/omni/omni.cpp:1350"},
+      {id:"LLM-6",module:"llm",kind:"control",work:"KV滑窗元数据、LLMOut队列与turn/chunk状态机",scale:"每token/fragment",dep:"host调度",src:"tools/omni/omni.cpp:11621"},
+
+      {id:"COND-1",module:"condition",kind:"data",work:"过滤控制token并同步压紧4096维hidden",scale:"每LLMOut；最多约10个有效token",dep:"token与hidden必须一一对应",src:"tools/omni/omni.cpp:7440"},
+      {id:"COND-2",module:"condition",kind:"compute",work:"emb_text[token_id]查表",scale:"768 F32=3 KiB/token",dep:"只依赖token ID",src:"tools/omni/omni.cpp:2366"},
+      {id:"COND-3",module:"condition",kind:"data",work:"semantic projector H2D/D2H及临时graph/buffer管理",scale:"输入16 KiB、输出3 KiB/token",dep:"矩阵乘在NPU",src:"tools/omni/omni.cpp:1800"},
+      {id:"COND-4",module:"condition",kind:"compute",work:"768维projected hidden逐token L2 normalize",scale:"每有效文本token",dep:"等待完整projector输出",src:"tools/omni/omni.cpp:2504"},
+      {id:"COND-5",module:"condition",kind:"compute",work:"text+semantic逐元素add并拼接BOS/EOS",scale:"每LLMOut",dep:"完成后condition H2D",src:"tools/omni/omni.cpp:7515"},
+
+      {id:"TTS-1",module:"tts",kind:"data",work:"768维TTS hidden D2H/取得host指针",scale:"3 KiB/audio token",dep:"head_code前同步可见",src:"tools/omni/omni.cpp:3499"},
+      {id:"TTS-2",module:"tts",kind:"compute",work:"head_code矩阵向量乘",scale:"6562×768=5,039,616 F32 MAC/token",dep:"常驻32线程；最大显式CPU算术热点",src:"tools/omni/tts-head-code-executor.cpp:42"},
+      {id:"TTS-3",module:"tts",kind:"compute",work:"temperature除法与audio EOS mask",scale:"6562 logits/token",dep:"线性扫词表",src:"tools/omni/omni.cpp:3620"},
+      {id:"TTS-4",module:"tts",kind:"compute",work:"最近16 token的稀疏repetition penalty",scale:"≤16历史项",dep:"已避免完整频次表",src:"tools/omni/omni.cpp:2980"},
+      {id:"TTS-5",module:"tts",kind:"compute",work:"max、exp、sum与softmax",scale:"6562 logits/token",dep:"head logits之后",src:"tools/omni/omni.cpp:3067"},
+      {id:"TTS-6",module:"tts",kind:"compute",work:"partial top-k(25)、top-p、重归一化与multinomial",scale:"6562→最多25候选",dep:"输出ID决定下一decode",src:"tools/omni/omni.cpp:2820"},
+      {id:"TTS-7",module:"tts",kind:"compute",work:"emb_code[audio_id]查表",scale:"768 F32=3 KiB/token",dep:"采样ID产生后才能执行；随后H2D",src:"tools/omni/omni.cpp:3660"},
+
+      {id:"T2W-1",module:"t2w",kind:"control",work:"队列合并、token_buffer追加、28窗口与25步长滑动",scale:"每packet/window",dep:"保持3-token lookahead",src:"tools/omni/omni.cpp:10380"},
+      {id:"T2W-2",module:"t2w",kind:"compute",work:"final不足28 token时pad 4218并裁剪有效Mel",scale:"每尾窗口",dep:"NPU图仍固定28输入",src:"tools/omni/token2wav/token2wav-impl.cpp:9952"},
+      {id:"T2W-3",module:"t2w",kind:"data",work:"Token2Mel流cache的host导入/导出",scale:"每窗口；依backend/graph模式",dep:"Conformer/DiT CNN及attention cache",src:"tools/omni/token2wav/token2wav-impl.cpp:8330"},
+      {id:"T2W-4",module:"t2w",kind:"compute",work:"Hamming crossfade",scale:"最多3840 samples/window",dep:"使用上一包wave tail",src:"tools/omni/token2wav/token2wav-impl.cpp:10180"},
+      {id:"T2W-5",module:"t2w",kind:"data",work:"8帧Mel、3840 source和3840 wave尾缓存裁剪复制",scale:"每窗口",dep:"下一Vocoder依赖这些cache",src:"tools/omni/token2wav/token2wav-impl.cpp:10395"},
+      {id:"T2W-6",module:"t2w",kind:"compute",work:"finite检查、clamp与F32→S16",scale:"稳态约24,000 samples/WAV",dep:"写盘前",src:"tools/omni/omni.cpp:10770"},
+      {id:"T2W-7",module:"t2w",kind:"data",work:"RIFF header/PCM写盘、callback、JSONL与done flag",scale:"每WAV/final",dep:"最终flag必须晚于最后文件落盘",src:"tools/omni/omni.cpp:10780"}
+    ];
+
+    const savingEstimates = [
+      {rank:1,id:"TTS-2",p:"P2",confidence:"high",unit:"0.017–0.044 ms / audio token",gross:[6,16],net:[6,16],action:"继续SIMD/NUMA优化，或使用带精确guard的compact head",basis:"实测当前55.683 ms/run。历史NPU路径存在采样轨迹风险，同轨迹compact路径完整链路收益接近噪声。"},
+      {rank:2,id:"COND-3",p:"P1",confidence:"medium",unit:"0.10–0.28 ms / text token + graph setup",gross:[5,14],net:[5,14],action:"持久化projector buffer，并把normalize/add留在device侧",basis:"13/15条完整profile已观测13.404 ms；应与COND-2/4/5作为一个融合包，避免NPU→CPU→NPU。"},
+      {rank:3,id:"LLM-5",p:"P1",confidence:"medium",unit:"0.08–0.23 ms / 有效text token",gross:[4,12],net:[4,12],action:"按fragment批量D2H hidden，使用持久化双buffer，去掉逐token malloc/memcpy",basis:"本轮约53个condition token；16 KiB/token字节数不大，主要目标是逐token同步与分配。"},
+      {rank:4,id:"IN-3",p:"P1",confidence:"low",unit:"0.8–3.0 ms / frame",gross:[30,110],net:[2,12],action:"preprocess worker + 双buffer；向量化JPEG/UHD resize路径",basis:"37张不同的540×960 JPEG。阶段累计潜力大，但多数发生在SPEAK计时外或被1秒输入节奏隐藏。"},
+      {rank:5,id:"T2W-3",p:"P2",confidence:"low",unit:"0.3–1.1 ms / window",gross:[3,12],net:[3,10],action:"cache常驻device，或使用pinned双buffer和event传输",basis:"本轮11个WAV窗口；host cache搬运依backend/graph模式，必须先用CANN timeline确认。"},
+      {rank:6,id:"IN-4",p:"P1",confidence:"low",unit:"0.5–2.0 ms / frame",gross:[20,75],net:[2,10],action:"把U8→F32、normalize、HWC→CHW融合成一次向量化遍历",basis:"37帧；与IN-3共用预处理关键路径，两个收益不能直接相加。"},
+      {rank:7,id:"IN-2",p:"P1",confidence:"low",unit:"0.3–1.2 ms / audio chunk",gross:[12,45],net:[1,7],action:"复用FFT plan/workspace，SIMD Mel/log，并与当前帧NPU编码双缓冲",basis:"37个1秒16 kHz音频块；encoder阶段毛收益会被实时输入pacing明显折扣。"},
+      {rank:8,id:"TTS-5",p:"P2",confidence:"medium",unit:"0.006–0.014 ms / audio token",gross:[2,5],net:[2,5],action:"融合max/exp/sum/normalize遍历，或只对安全候选做精确计算",basis:"属于实测15.966 ms sampler总上限；不能与TTS-3/4/6无条件相加。"},
+      {rank:9,id:"T2W-7",p:"P1",confidence:"medium",unit:"0.1–0.5 ms / WAV",gross:[1,6],net:[1,5],action:"单一有序writer线程；final done flag等待队列排空",basis:"本轮11个WAV。mtime可获得毫秒级收益，但100 ms evaluator轮询可能把结果量化成0或100 ms跳变。"},
+      {rank:10,id:"TTS-6",p:"P2",confidence:"medium",unit:"0.004–0.011 ms / audio token",gross:[1.5,4],net:[1.5,4],action:"继续复用partial-TopK workspace，合并top-p重归一化与multinomial遍历",basis:"当前已有partial TopK和thread_local workspace，剩余空间有限。"},
+      {rank:11,id:"T2W-6",p:"P2",confidence:"medium",unit:"0.10–0.36 ms / WAV",gross:[1,4],net:[1,4],action:"NEON/SVE向量化finite+clamp+F32→S16，或与writer融合",basis:"本轮最终输出约27万samples；是稳定的小型线性CPU循环。"},
+      {rank:12,id:"IN-5",p:"P1",confidence:"low",unit:"0.2–0.7 ms / frame",gross:[8,25],net:[1,4],action:"按固定shape缓存position index与2D sin/cos embedding",basis:"正确性风险低；但仍与IN-3/4预处理流水共享可隐藏窗口。"},
+      {rank:13,id:"LLM-3",p:"P2",confidence:"low",unit:"0.015–0.060 ms / text token",gross:[0.8,3],net:[0.8,3],action:"保持partial候选路径，消除可避免的同步与workspace操作",basis:"下一token严格依赖采样结果，不能与本序列下一decode重叠；此视频文本token较少。"},
+      {rank:14,id:"TTS-3",p:"P2",confidence:"medium",unit:"0.002–0.007 ms / audio token",gross:[0.8,2.5],net:[0.8,2.5],action:"把temperature缩放和EOS mask折进sampler第一次扫描",basis:"轨迹不变；收益受15.966 ms sampler总时间约束。"},
+      {rank:15,id:"IN-6",p:"P2",confidence:"low",unit:"0.05–0.19 ms / frame",gross:[2,7],net:[0.5,2],action:"预分配embedding packet，encoder输出使用move/零拷贝handoff",basis:"VPM/APM join之后主要是memcpy和vector扩容。"},
+      {rank:16,id:"COND-1",p:"P2",confidence:"medium",unit:"0.01–0.04 ms / text token",gross:[0.5,2],net:[0.5,2],action:"在LLM fragment构造时同步完成token过滤和hidden压紧",basis:"避免第二次复制4096维hidden row；与LLM-5批量D2H耦合。"},
+      {rank:17,id:"LLM-1",p:"P2",confidence:"low",unit:"batch打包小收益",gross:[0.5,2],net:[0.5,2],action:"复用position/batch vector并按稳定fragment大小reserve",basis:"只能减少分配和bookkeeping，decode数据依赖不会消失。"},
+      {rank:18,id:"T2W-5",p:"P2",confidence:"medium",unit:"0.04–0.14 ms / window",gross:[0.4,1.5],net:[0.4,1.5],action:"Mel/source/wave tail改用ring buffer或view，避免erase/copy",basis:"本轮11窗口；必须保持vocoder cache的严格顺序。"},
+      {rank:19,id:"IN-1",p:"P3",confidence:"medium",unit:"0.05–0.20 ms / audio chunk",gross:[2,8],net:[0.3,1.5],action:"对已是mono 16 kHz PCM WAV走fast path并复用decode buffer",basis:"官方输入本来就是16 kHz单声道，通常无需真正重采样。"},
+      {rank:20,id:"COND-5",p:"P3",confidence:"medium",unit:"0.006–0.020 ms / text token",gross:[0.3,1.2],net:[0.3,1.2],action:"在device condition输出中融合add与BOS append",basis:"单独价值很小，应计入COND-3整体device fusion，不能重复计算。"},
+      {rank:21,id:"TTS-1",p:"P3",confidence:"medium",unit:"0.0005–0.003 ms / audio token",gross:[0.2,1],net:[0.2,1],action:"只有确认存在独立同步时才做mapped output或双buffer",basis:"compact诊断hidden read约0.001 ms/token；全轮传输量只有约1 MiB。"},
+      {rank:22,id:"COND-4",p:"P3",confidence:"medium",unit:"0.004–0.015 ms / text token",gross:[0.2,0.8],net:[0.2,0.8],action:"把L2 reduction/scale融合进projector device graph",basis:"本轮仅约4.1万floats；真正价值是与COND-3一起消除往返。"},
+      {rank:23,id:"LLM-6",p:"P3",confidence:"low",unit:"队列/状态bookkeeping",gross:[0.2,0.8],net:[0.2,0.8],action:"减少队列复制并合并状态迁移，但保持turn顺序",basis:"控制路径本身很小，修改却容易影响终止与flush语义。"},
+      {rank:24,id:"T2W-1",p:"P3",confidence:"medium",unit:"0.02–0.07 ms / window",gross:[0.2,0.8],net:[0.2,0.8],action:"append-slice-erase改为ring deque或索引view",basis:"11个窗口且每次只有几十个token ID，绝对上限低。"},
+      {rank:25,id:"T2W-4",p:"P3",confidence:"medium",unit:"0.01–0.05 ms / window",gross:[0.1,0.6],net:[0.1,0.6],action:"向量化Hamming blend或并入waveform copy",basis:"每窗口最多3840 samples，完全驻留host内存。"},
+      {rank:26,id:"LLM-4",p:"P3",confidence:"medium",unit:"0.002–0.010 ms / text token",gross:[0.1,0.5],net:[0.1,0.5],action:"延迟token→piece转换，直到fragment真正发布",basis:"字符串转换不是LLM decode主瓶颈。"},
+      {rank:27,id:"TTS-7",p:"P3",confidence:"high",unit:"0.0003–0.0009 ms / audio token",gross:[0.1,0.3],net:[0.1,0.3],action:"pinned embedding row或device-side gather",basis:"实测当前总耗时只有0.435 ms/run，这就是不可突破的硬上限。"},
+      {rank:28,id:"COND-2",p:"P3",confidence:"medium",unit:"0.001–0.006 ms / text token",gross:[0.05,0.3],net:[0.05,0.3],action:"作为condition fusion的一部分改为device embedding gather",basis:"本轮需要的embedding row总量约160 KiB。"},
+      {rank:29,id:"T2W-2",p:"P3",confidence:"medium",unit:"0.02–0.10 ms / final window",gross:[0.05,0.3],net:[0.05,0.3],action:"预分配pad buffer并用view裁剪有效Mel",basis:"仅在turn尾部发生；NPU图仍需固定28-token输入。"},
+      {rank:30,id:"TTS-4",p:"P3",confidence:"high",unit:"0.0002–0.0007 ms / audio token",gross:[0.05,0.25],net:[0.05,0.25],action:"维持最近16 token的稀疏实现，不再做大改",basis:"已经避免完整词表频次扫描，最多处理16个历史项。"},
+      {rank:31,id:"LLM-2",p:"P3",confidence:"high",unit:"每text token仅3个标量写",gross:[0.01,0.05],net:[0.01,0.05],action:"保持现状，或机械地折进sampler入口",basis:"只修改LISTEN、TTS_PAD和可选TURN_EOS三个logit。"}
+    ];
+
+    const stages = [
+      {name:"VPM（CPU预处理+NPU）",n:111,mean:174.739,min:163.637,max:262.904,note:"每输入frame"},
+      {name:"APM（CPU预处理+NPU）",n:111,mean:17.284,min:13.920,max:51.091,note:"每输入frame"},
+      {name:"LLM prefill",n:111,mean:20.472,min:15.909,max:93.538,note:"chunk stage"},
+      {name:"LLM decode",n:111,mean:59.113,min:0,max:199.037,note:"含无decode chunk"},
+      {name:"TTS fragment",n:36,mean:141.113,min:51.561,max:255.124,note:"每文本fragment"},
+      {name:"Token2Wav总调用",n:33,mean:280.352,min:69.906,max:1117.332,note:"明显双峰"},
+      {name:"T2W queue wait",n:33,mean:158.468,min:.006,max:708.190,note:"排队墙钟"}
+    ];
+
+    const candidates = [
+      {p:"P1",title:"下一帧CPU预处理 || 当前帧NPU编码",flow:"frame i    NPU: VPM/APM encode ───────────▶\nframe i+1  CPU: decode / log-Mel / resize ─▶",risk:"风险：低~中",value:"价值：中",status:"先拆分测CPU占比",desc:"把encoder thread拆成preprocess worker、预处理队列和单owner NPU encoder，使用双buffer。不同frame输入独立，但vision/audio context不能被两个线程同时进入。"},
+      {p:"P1",title:"PCM/WAV writer || 下一T2W窗口",flow:"window i    NPU T2W → D2H → enqueue writer\nwindow i+1                   NPU T2W ─────▶\nwriter                       S16 + fwrite",risk:"风险：低",value:"价值：低~中",status:"PCM+write P95≥1ms才做",desc:"单writer维持WAV顺序，final flag等待最后job落盘。主要隐藏文件系统和poll尾延迟，不应预设有大收益。"},
+      {p:"P2",title:"Token2Mel(i+1) || Vocoder(i)",flow:"T2M stream  T2M(i) ── T2M(i+1) ───────▶\nVOC stream          VOC(i) ─── VOC(i+1) ─▶",risk:"风险：中",value:"价值：条件性中",status:"需要CANN timeline",desc:"T2M(i+1)只依赖T2M cache，不依赖VOC(i)输出。需要双mel buffer、独立stream/event，并防止同卡争用把两个stage都拖慢。"},
+      {p:"P2",title:"LLM hidden D2H || CPU logits sampler",flow:"decode(t) → logits(t+1) → CPU sample\n          └→ hidden(t) async D2H ───────▶ TTS",risk:"风险：中",value:"价值：低~中",status:"需要device双buffer",desc:"hidden给TTS、logits给下一token sampler，语义上独立。更实际的版本是按10-token fragment批量D2H，避免逐token malloc/memcpy。"},
+      {p:"P3",title:"emb_text gather || semantic projector",flow:"CPU  emb_text[token] ──────────────▶\nNPU  projector(hidden) ─────────────▶ join",risk:"风险：低",value:"价值：低",status:"更推荐condition融合",desc:"两者输入独立，但emb_text只有3 KiB/token。与其新增线程，更值得把embedding、L2和add并入device condition graph。"}
+    ];
+
+    const dependencies = [
+      {title:"主LLM sampler → 下一token decode",desc:"下一token ID就是sampler输出；没有ID就无法查embedding和执行Transformer。"},
+      {title:"TTS head/sampler → 下一audio-token decode",desc:"严格链为hidden→head logits→sampled ID→emb_code→decode。"},
+      {title:"Projector → 同一token L2 normalize",desc:"L2依赖完整projector结果，除非融合进NPU图或按tile异步输出。"},
+      {title:"Vocoder(i) → Vocoder(i+1)",desc:"后一包必须使用前一包更新后的Mel/source/wave cache，不能乱序。"}
+    ];
+
+    function renderBars() {
+      const max = Math.max(...stages.map(x => x.mean));
+      document.getElementById("overviewBars").innerHTML = stages.map(s => `
+        <div class="bar-row"><span class="bar-label">${s.name}</span><div class="bar-track"><div class="bar-fill ${s.mean > 250 ? "warn" : ""}" style="--w:${(s.mean/max*100).toFixed(1)}%"></div></div><span class="bar-value">${s.mean.toFixed(1)} ms</span></div>`).join("");
+    }
+
+    function renderInventory() {
+      const q = document.getElementById("searchInput").value.trim().toLowerCase();
+      const mod = document.getElementById("moduleFilter").value;
+      const kind = document.getElementById("kindFilter").value;
+      const rows = inventory.filter(x => (mod === "all" || x.module === mod) && (kind === "all" || x.kind === kind) && (!q || Object.values(x).join(" ").toLowerCase().includes(q)));
+      document.getElementById("inventoryBody").innerHTML = rows.map(x => `<tr>
+        <td class="id-cell">${x.id}</td><td>${moduleNames[x.module]}</td><td><span class="kind ${x.kind}">${kindNames[x.kind]}</span></td>
+        <td>${x.work}</td><td>${x.scale}</td><td>${x.dep}</td><td><span class="src">${x.src}</span></td></tr>`).join("");
+      document.getElementById("resultCount").textContent = `${rows.length} / ${inventory.length}`;
+    }
+
+    function formatRange(range) {
+      const f = v => v < 0.1 ? v.toFixed(2) : (Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1));
+      return `${f(range[0])}–${f(range[1])} ms`;
+    }
+
+    function renderSavings() {
+      const q = document.getElementById("savingSearch").value.trim().toLowerCase();
+      const mod = document.getElementById("savingModule").value;
+      const confidence = document.getElementById("savingConfidence").value;
+      const rows = savingEstimates.filter(x => {
+        const site = inventory.find(i => i.id === x.id);
+        const haystack = `${x.id} ${x.action} ${x.basis} ${site ? site.work : ""}`.toLowerCase();
+        return site && (mod === "all" || site.module === mod) &&
+          (confidence === "all" || x.confidence === confidence) && (!q || haystack.includes(q));
+      });
+      const confNames = {high:"高", medium:"中", low:"低"};
+      document.getElementById("savingBody").innerHTML = rows.map(x => {
+        const site = inventory.find(i => i.id === x.id);
+        return `<tr>
+          <td><span class="rank-badge">${x.rank}</span></td>
+          <td><span class="id-cell">${x.id}</span><span class="saving-sub">${moduleNames[site.module]} · ${site.work}</span></td>
+          <td><span class="priority ${x.p.toLowerCase()}">${x.p}</span></td>
+          <td><span class="confidence ${x.confidence}">${confNames[x.confidence]}</span></td>
+          <td>${x.unit}</td>
+          <td><span class="saving-main">${formatRange(x.gross)}</span></td>
+          <td><span class="saving-main">${formatRange(x.net)}</span><span class="saving-sub">关键路径折扣后</span></td>
+          <td>${x.action}</td><td class="estimate-note">${x.basis}</td>
+        </tr>`;
+      }).join("");
+      document.getElementById("savingCount").textContent = `${rows.length} / ${savingEstimates.length}`;
+    }
+
+    function renderCandidates() {
+      document.getElementById("candidateGrid").innerHTML = candidates.map(c => `<article class="candidate">
+        <div class="candidate-top"><span class="priority ${c.p.toLowerCase()}">${c.p}</span><span class="footnote">${c.status}</span></div>
+        <h3>${c.title}</h3><p>${c.desc}</p><div class="flow-mini">${c.flow}</div><div class="candidate-meta"><span>${c.risk}</span><span>${c.value}</span></div></article>`).join("");
+      document.getElementById("dependencyList").innerHTML = dependencies.map(d => `<div class="dependency"><div class="x">×</div><div><strong>${d.title}</strong><p>${d.desc}</p></div></div>`).join("");
+    }
+
+    function renderStages() {
+      document.getElementById("stageBody").innerHTML = stages.map(s => `<tr><td>${s.name}</td><td>${s.n}</td><td>${s.mean.toFixed(3)} ms</td><td>${s.min.toFixed(3)}</td><td>${s.max.toFixed(3)}</td><td>${s.note}</td></tr>`).join("");
+    }
+
+    document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(x => x.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(x => x.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    }));
+
+    const moduleFilter = document.getElementById("moduleFilter");
+    Object.entries(moduleNames).forEach(([value,label]) => moduleFilter.insertAdjacentHTML("beforeend", `<option value="${value}">${label}</option>`));
+    const savingModule = document.getElementById("savingModule");
+    Object.entries(moduleNames).forEach(([value,label]) => savingModule.insertAdjacentHTML("beforeend", `<option value="${value}">${label}</option>`));
+    ["searchInput","moduleFilter","kindFilter"].forEach(id => document.getElementById(id).addEventListener(id === "searchInput" ? "input" : "change", renderInventory));
+    ["savingSearch","savingModule","savingConfidence"].forEach(id => document.getElementById(id).addEventListener(id === "savingSearch" ? "input" : "change", renderSavings));
+    document.getElementById("themeToggle").addEventListener("click", () => document.body.classList.toggle("light"));
+
+    renderBars();
+    renderInventory();
+    renderSavings();
+    renderCandidates();
+    renderStages();
+  </script>
+</body>
+</html>
