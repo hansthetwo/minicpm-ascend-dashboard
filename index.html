@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>PR29 CPU 计算与 Overlap 分析看板</title>
+  <title>PR29 CPU / NPU / Overlap 优化分析看板</title>
   <style>
     :root {
       --bg: #071019;
@@ -254,16 +254,62 @@
     .saving-sub { display: block; margin-top: 3px; color: var(--muted); font-size: .69rem; white-space: nowrap; }
     .estimate-note { max-width: 520px; color: var(--muted); font-size: .73rem; }
 
+    .objective-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; }
+    .equation {
+      display: flex;
+      align-items: center;
+      min-height: 116px;
+      padding: 18px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: #bceff1;
+      background: rgba(0,0,0,.16);
+      font: 700 clamp(.82rem, 1.4vw, 1.08rem)/1.7 "SFMono-Regular", Consolas, monospace;
+      white-space: nowrap;
+    }
+    body.light .equation { color: #315a6d; background: rgba(38,67,95,.06); }
+    .objective-notes { display: grid; gap: 9px; }
+    .objective-note { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; }
+    .objective-note strong { display: block; font-size: .83rem; }
+    .objective-note p { margin: 4px 0 0; color: var(--muted); font-size: .76rem; }
+
+    .roadmap-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+    .roadmap-card { padding: 18px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, rgba(105,167,255,.06), transparent); }
+    .roadmap-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .scope { display: inline-flex; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .68rem; font-weight: 800; }
+    .roadmap-card h3 { margin: 13px 0 6px; }
+    .roadmap-card > p { margin: 0; color: var(--muted); font-size: .82rem; }
+    .roadmap-card ul { margin: 12px 0 0; padding-left: 19px; color: var(--muted); font-size: .77rem; }
+    .roadmap-card li + li { margin-top: 5px; }
+    .impact-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+    .impact-row span { padding: 4px 7px; border-radius: 7px; color: var(--muted); background: rgba(148,178,209,.08); font-size: .68rem; }
+
+    .avoid-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .avoid-item { display: grid; grid-template-columns: 34px 1fr; gap: 11px; padding: 14px; border: 1px solid rgba(255,111,125,.18); border-radius: 12px; background: rgba(255,111,125,.045); }
+    .avoid-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: var(--red); background: rgba(255,111,125,.12); font-weight: 900; }
+    .avoid-item strong { display: block; font-size: .84rem; }
+    .avoid-item p { margin: 4px 0 0; color: var(--muted); font-size: .76rem; }
+
+    .delivery { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 9px; }
+    .delivery-step { position: relative; min-height: 132px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+    .delivery-step:not(:last-child)::after { content: "→"; position: absolute; z-index: 3; right: -14px; top: 50%; color: var(--cyan); }
+    .delivery-step span { color: var(--cyan); font-size: .66rem; font-weight: 900; }
+    .delivery-step strong { display: block; margin: 8px 0 5px; font-size: .82rem; }
+    .delivery-step p { margin: 0; color: var(--muted); font-size: .71rem; }
+
     .footnote { color: var(--muted); font-size: .76rem; }
     .footer { margin-top: 24px; padding: 18px 4px; color: var(--muted); font-size: .75rem; text-align: center; }
 
     @media (max-width: 1000px) {
-      .hero, .two-col { grid-template-columns: 1fr; }
+      .hero, .two-col, .objective-grid { grid-template-columns: 1fr; }
       .metric-grid { grid-template-columns: repeat(2,1fr); }
       .pipeline { grid-template-columns: 1fr; }
       .stage:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -19px; transform: translateX(50%); }
       .toolbar { grid-template-columns: 1fr 1fr; }
-      .candidate-grid { grid-template-columns: 1fr; }
+      .candidate-grid, .roadmap-grid, .avoid-grid { grid-template-columns: 1fr; }
+      .delivery { grid-template-columns: repeat(3,1fr); }
+      .delivery-step:nth-child(3)::after { content: ""; }
     }
     @media (max-width: 650px) {
       .shell { width: min(100% - 18px, 1500px); }
@@ -272,6 +318,9 @@
       .metric-grid, .toolbar, .ab-grid, .estimate-summary { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: 100px 1fr 70px; }
       .panel { padding: 15px; }
+      .delivery { grid-template-columns: 1fr; }
+      .delivery-step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -17px; transform: translateX(50%); }
+      .delivery-step:nth-child(3)::after { content: "↓"; }
     }
   </style>
 </head>
@@ -281,7 +330,7 @@
       <div class="brand">
         <div class="brand-mark">P29</div>
         <div class="brand-copy">
-          <strong>CPU × NPU Pipeline Inspector</strong>
+          <strong>CPU × NPU Optimization Inspector</strong>
           <span>MiniCPM-o · Official Duplex Path</span>
         </div>
       </div>
@@ -295,8 +344,8 @@
     <section class="hero">
       <div class="hero-copy">
         <div class="eyebrow">Static scan + runtime evidence</div>
-        <h1>CPU 计算分布与<br>Overlap 可行性</h1>
-        <p>沿 PR29 官方 W8A8 双工调用链，逐项定位主机侧计算、数据搬运与同步点，并结合三次正式运行判断哪些工作能安全重叠、哪些受自回归依赖约束。</p>
+        <h1>CPU / NPU 优化路线与<br>Overlap 可行性</h1>
+        <p>沿 PR29 官方 W8A8 双工调用链，结合模型结构、主机侧热路径与三次正式运行，区分直接降低稳态 RTF 的设备驻留/小 M 优化，以及主要改善 SPEAK→wav 的流水重叠。</p>
         <div class="meta-row">
           <span class="meta-chip">Commit ecab6c47</span>
           <span class="meta-chip">CANN / Ascend</span>
@@ -329,6 +378,7 @@
       <button class="tab-btn active" data-tab="overview" role="tab">总览</button>
       <button class="tab-btn" data-tab="inventory" role="tab">CPU清单</button>
       <button class="tab-btn" data-tab="savings" role="tab">31项收益排序</button>
+      <button class="tab-btn" data-tab="roadmap" role="tab">优化路线</button>
       <button class="tab-btn" data-tab="overlap" role="tab">Overlap候选</button>
       <button class="tab-btn" data-tab="evidence" role="tab">动态证据</button>
       <button class="tab-btn" data-tab="method" role="tab">边界与验收</button>
@@ -445,6 +495,115 @@
       </div>
     </section>
 
+    <section class="tab-pane" id="roadmap" role="tabpanel">
+      <article class="panel">
+        <div class="panel-head"><div><h2>先对准正式指标</h2><div class="panel-sub">稳态 RTF 与 SPEAK→wav 不是同一个优化目标；同一改动可能只改善其中之一</div></div></div>
+        <div class="objective-grid">
+          <div class="equation">Tframe = max(TVPM, TAPM) + Tprefill + Tdecode + TTTS + TToken2Wav</div>
+          <div class="objective-notes">
+            <div class="objective-note"><strong>Encoder 只优化临界侧</strong><p>VPM/APM 已并行；只有降低两者较慢一侧才会减少该帧 RTF。当前样本 VPM 墙钟显著高于 APM，应先拆分 CPU/NPU 后验证。</p></div>
+            <div class="objective-note"><strong>Overlap 主要看首包延迟</strong><p>流水重叠可减少等待和 SPEAK→wav，但若两个 NPU stage 自身变慢，正式 pooled RTF 可能不降反升。</p></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>建议优化方案</h2><div class="panel-sub">优先攻击每 token / 每窗口重复发生的同步、分配和搬运；优先级已结合当前 PR29 动态证据调整</div></div></div>
+        <div class="roadmap-grid">
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p1">P1</span><span class="scope">NPU / TTS condition</span></div>
+            <h3>Condition 全设备端融合</h3>
+            <p>将 semantic projector 做成持久 session，并让 LLM hidden 通过后端中立的 device tensor 引用直接交给 TTS。</p>
+            <ul><li>预分配 projector graph、buffer 与 workspace，按常见 token 数做有界 shape cache。</li><li>融合 emb_text gather、两层 MLP、L2 normalize、embedding add 与 audio BOS 写入。</li><li>保留 CPU / 跨设备 fallback；scratch tensor 必须复制到有明确生命周期的持久 buffer。</li></ul>
+            <div class="impact-row"><span>RTF：直接</span><span>消除 NPU→CPU→NPU</span><span>正确性风险：低~中</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p1">P1</span><span class="scope">NPU / Token2Wav</span></div>
+            <h3>Token2Wav 全链路 device-resident</h3>
+            <p>Token2Mel、flow state、mel、vocoder 输入与 cache 常驻 NPU，普通非 final 窗口只下载最终 PCM。</p>
+            <ul><li>复用固定 28-token / stride-25 图、常量、mask、timestep 与最大 workspace。</li><li>cache crop/copy 改为设备 ring buffer 或 view；layout conversion 走 D2D。</li><li>最终 PCM 使用 pinned 双 buffer 异步 D2H，消费前才等待 event。</li></ul>
+            <div class="impact-row"><span>RTF：直接</span><span>SPEAK→wav：直接</span><span>先优化 non-final graph</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p1">P1</span><span class="scope">CPU / steady state</span></div>
+            <h3>去掉逐次分配、拷贝与线程创建</h3>
+            <p>CPU 优化重点不是零散标量运算，而是高频分配、同步和整段内存整理。</p>
+            <ul><li>LLM hidden 按 fragment 批量 D2H，复用双 buffer，去掉逐 token malloc/memcpy。</li><li>复用 FFT plan、position tensor、batch vector；固定 shape 预计算 sin/cos。</li><li>Token/WAV cache 使用 ring buffer；PCM finite+clamp+F32→S16 用 SIMD，并交给单一有序 writer。</li></ul>
+            <div class="impact-row"><span>RTF：条件性</span><span>CPU 占用：直接</span><span>低风险先落地</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p2">P2</span><span class="scope">NPU / small-M decode</span></div>
+            <h3>为 M=1 单独设计 Transformer 路径</h3>
+            <p>文本与语音自回归 decode 都是小 M；不要与 variable-M prefill 共用一套通用 matmul 策略。</p>
+            <ul><li>逐 shape 比较向量 GEMV 与 Cube GEMM；权重只预打包一次，先看 FFN gate/up 与 down projection。</li><li>合并 gate+up、QKV 投影；融合 SiLU×mul、Q/K norm、RoPE 与 KV cache write。</li><li>使用原生 GQA head 映射，禁止把 8 个 KV heads 物化扩展到 32 heads。</li></ul>
+            <div class="impact-row"><span>RTF：直接</span><span>文本 + 语音共享</span><span>按 end-to-end layer 选型</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p2">P2</span><span class="scope">CPU↔NPU / TTS head</span></div>
+            <h3>受控验证 TTS output head 上 NPU</h3>
+            <p><code>768→6562</code> 是最大显式 CPU 算术热点，但当前 32 线程实现已较快，历史 NPU 路线存在采样轨迹漂移，因此不能直接替换。</p>
+            <ul><li>Stage A 只迁移 projection，CPU 保留 repetition penalty、top-k/top-p、RNG 与最终 sampling。</li><li>head_code、logits、workspace 全部持久化；不得逐 token 构图或申请。</li><li>固定 seed 要求 speech token IDs 完全一致；通过后才尝试 device top-k，只回传 top-k values/IDs。</li></ul>
+            <div class="impact-row"><span>RTF：待 A/B</span><span>token 轨迹硬门槛</span><span>不通过则保留 CPU</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p2">P2</span><span class="scope">VPM / APM / scheduler</span></div>
+            <h3>只优化当前较慢的 Encoder</h3>
+            <p>持续记录 <code>Δencoder = TVPM − TAPM</code>；谁更常为正就优先优化谁，接近持平后再交替推进。</p>
+            <ul><li>VPM：相同尺寸 slice 有界 batch、输入/position buffer 复用、固定 shape session。</li><li>APM：1 秒音频块固定图、FFT/feature buffer 与 encoder workspace 常驻。</li><li>若 <code>std::async</code> 有稳态成本，改为持久 worker；每 worker 独占 ACL context、stream、arena 与 completion event。</li></ul>
+            <div class="impact-row"><span>RTF：只取决于慢侧</span><span>先分离 CPU/NPU 计时</span><span>答案精度需复测</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p2">P2</span><span class="scope">Overlap / latency</span></div>
+            <h3>有界 LLM→TTS→Token2Wav 流水</h3>
+            <p>在达到首个 28-token 窗口后立即触发非 final Token2Wav，用 double/triple buffer 降低 SPEAK→首段 PCM。</p>
+            <ul><li>队列必须有界，取消与 turn/epoch 校验必须能穿透所有 stage。</li><li>优先尝试 CPU preprocess(i+1) || NPU encode(i)、PCM writer(i) || NPU window(i+1)。</li><li>T2M(i+1) || Vocoder(i) 只在独立 stream/event 且 CANN timeline 无明显争用时启用。</li></ul>
+            <div class="impact-row"><span>SPEAK→wav：主要目标</span><span>RTF：不保证</span><span>必须同时跑 isolated/overlapped</span></div>
+          </article>
+
+          <article class="roadmap-card">
+            <div class="roadmap-top"><span class="priority p3">P3</span><span class="scope">CANN backend</span></div>
+            <h3>Plan cache 与 stream-scoped arena</h3>
+            <p>减少 ACLNN GetWorkspaceSize、descriptor、常量和通用 workspace 的重复准备，但只缓存 API 文档允许跨调用复用的对象。</p>
+            <ul><li>按 op、dtype、shape、stride/layout、attribute、device 建有界 signature cache。</li><li>Qwen decode、TTS decode、每个 Token2Wav 图使用独立持久 arena。</li><li>每 stream 独占 transient pool，以 event 建依赖，排查全局锁与隐式 device synchronize。</li></ul>
+            <div class="impact-row"><span>RTF：辅助收益</span><span>降低 launch/allocator 开销</span><span>先做 timeline</span></div>
+          </article>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>当前不建议做</h2><div class="panel-sub">不是永久禁止，而是在现有证据下不应作为第一轮主线</div></div></div>
+        <div class="avoid-grid">
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>全局启用 ACL Graph</strong><p>本分支曾出现同卡跨线程 capture 与同步 H2D 冲突。仅对固定 shape、固定地址、单 owner 的白名单图逐个启用。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>全模型重做 weight layout</strong><p>开发与回归面过大。只对 M=1 热 shape 的 gate/up、QKV、FFN 做内部预打包，并保留原始权重语义。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>先量化 8B backbone</strong><p>会同时改变精度、采样轨迹和基线口径；当前先消除重复同步与搬运。量化必须另开 baseline tag 单独评估。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>恢复同卡粗粒度 TTS || T2W</strong><p>历史 A/B 中两个 stage 都明显变慢，完整链路不足 1%。除非资源隔离与新 timeline 证明争用已经消失。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>优化较快的 Encoder</strong><p>VPM/APM 计时取 max；加速非临界侧没有 RTF 收益。以 Δencoder 分布而不是单个 kernel GFLOPS 决策。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>以初始化或 final flush 为 RTF 主线</strong><p>正式稳态会排除冷启动与最终 flush。它们可以改善体验，但优先级低于每 token / 每窗口重复工作。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>物化展开 GQA 的 K/V</strong><p>32 Q heads / 8 KV heads 应在 attention 内直接映射；四倍展开只会增加带宽和中间显存。</p></div></div>
+          <div class="avoid-item"><div class="avoid-icon">×</div><div><strong>无界 shape cache 或流水队列</strong><p>会把吞吐问题转化为内存、尾延迟和取消问题。只缓存常见 shape，并为每级队列设置容量和背压。</p></div></div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head"><div><h2>建议拆分为 6 个可回退 PR</h2><div class="panel-sub">每一步都先建立直接证据，再决定是否进入下一层融合或并发</div></div></div>
+        <div class="delivery">
+          <div class="delivery-step"><span>PR 01</span><strong>Baseline / Observability</strong><p>分离 CPU、NPU、sync、alloc、D2H/H2D 与 queue wait；记录 Δencoder。</p></div>
+          <div class="delivery-step"><span>PR 02</span><strong>Condition Device Fusion</strong><p>持久 projector、device hidden handoff、L2/add/BOS 融合。</p></div>
+          <div class="delivery-step"><span>PR 03</span><strong>Token2Wav Residency</strong><p>cache/mel/vocoder 常驻；普通窗口只下载 PCM。</p></div>
+          <div class="delivery-step"><span>PR 04</span><strong>Small-M Kernels</strong><p>FFN、QKV、GQA-native decode；TTS head 仅受控实验。</p></div>
+          <div class="delivery-step"><span>PR 05</span><strong>CPU / Encoder</strong><p>批量 hidden、预处理双缓冲、只优化临界 encoder。</p></div>
+          <div class="delivery-step"><span>PR 06</span><strong>Bounded Overlap</strong><p>以 SPEAK→wav 为主目标；timeline 无争用后逐项启用。</p></div>
+        </div>
+        <div class="callout" style="margin-top:16px"><strong>统一验收</strong><p>固定 seed token 轨迹；WAV SHA-256 或 Seed-TTS WER/SIM；至少 3 次预热 + 20 次测量；同时报告 pooled/stage RTF、SPEAK→首 WAV、P50/P95、同步/搬运次数和 CANN timeline。完整链路改善不足 1% 或质量退化即回退。</p></div>
+      </article>
+    </section>
+
     <section class="tab-pane" id="overlap" role="tabpanel">
       <article class="panel">
         <div class="panel-head"><div><h2>推荐的Overlap候选</h2><div class="panel-sub">优先级综合正确性、临界路径概率、实现成本和历史A/B</div></div></div>
@@ -532,7 +691,7 @@
       </article>
     </section>
 
-    <footer class="footer">PR29 CPU / Overlap Analysis · Self-contained HTML · Source commit ecab6c4766064683f1af1e6b2b3c437b7d42120e</footer>
+    <footer class="footer">PR29 CPU / NPU / Overlap Optimization Analysis · Self-contained HTML · Source commit ecab6c4766064683f1af1e6b2b3c437b7d42120e</footer>
   </main>
 
   <script>
